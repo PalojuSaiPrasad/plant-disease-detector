@@ -5,6 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host",
+    "backend": "cd server && npm start",
+    "start:all": "concurrently \"npm run dev\" \"cd server && npm run dev\"",
+    "install:all": "npm install && cd server && npm install",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"

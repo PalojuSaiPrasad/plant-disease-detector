@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Navbar from './components/Navbar';
+import Footer from './components/Footer';
 import Home from './pages/Home';
 import Analyze from './pages/Analyze';
 import Dashboard from './pages/Dashboard';
@@ -19,9 +20,7 @@ function App() {
             <Route path="/about" element={<About />} />
           </Routes>
         </main>
-        <footer style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)', borderTop: '1px solid var(--glass-border)' }}>
-          <p>&copy; 2025 AgriSmart. All rights reserved.</p>
-        </footer>
+        <Footer />
       </div>
     </Router>
   );
