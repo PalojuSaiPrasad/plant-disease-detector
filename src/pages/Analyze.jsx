@@ -115,7 +115,7 @@ const Analyze = () => {
       const imagePart = await fileToGenerativePart(image);
 
       const prompt = `
-        You are a highly skilled plant pathology expert AI.
+        You are a highly skilled plant pathology and agronomy expert AI.
         Analyze this image ${manualCrop ? `(The user indicated this might be a ${manualCrop})` : ''}.
         First, determine if the image actually contains a plant or leaf.
         If the image does NOT contain any plant, crop, or leaf, respond with:
@@ -124,18 +124,19 @@ const Analyze = () => {
         {
           "isPlant": true,
           "cropName": "Detected crop name",
-          "disease": "Name of the disease (or 'Healthy' if no issue)",
+          "disease": "Name of the disease or 'Healthy Plant' if no disease found",
           "status": "Healthy, Infected, or Critical",
           "confidence": 95,
-          "infectionRatio": 0.25,
-          "severity": "Mild, Moderate, or Severe (or 'None' if healthy)",
-          "symptoms": ["Detailed symptom 1", "Detailed symptom 2"],
-          "treatment": ["treatment step 1", "treatment step 2"],
-          "preventive": ["preventive measure 1", "preventive measure 2"]
+          "infectionRatio": 0.0,
+          "severity": "Mild, Moderate, or Severe (use 'None' if healthy)",
+          "symptoms": ["For HEALTHY plants: list 3-4 visible positive health indicators you observe (e.g. vibrant green color, no lesions, firm texture, healthy venation). For DISEASED plants: describe disease symptoms."],
+          "treatment": ["For HEALTHY plants: provide 3-4 specific care tips to maintain and boost this plant's health (e.g. watering schedule, fertilizer recommendations, pruning tips). For DISEASED plants: list treatment steps."],
+          "preventive": ["Always provide 4-5 best practice preventive care measures specific to this crop type to prevent future issues (e.g. crop rotation, pest monitoring, soil health, irrigation tips)"]
         }
         Rules:
         - The response MUST be pure valid JSON only. No markdown code blocks.
-        - confidence: number 0-100. infectionRatio: decimal 0-1.
+        - confidence: number 0-100. infectionRatio: decimal 0-1 (use 0.0 for healthy plants).
+        - For HEALTHY plants, symptoms/treatment/preventive arrays MUST always be filled with rich, meaningful content — never empty.
         - Do not hallucinate a disease if the plant looks healthy.
         - If no plant is visible, ONLY return { "isPlant": false } and nothing else.
       `;
@@ -231,24 +232,24 @@ const Analyze = () => {
   const downloadReport = () => {
     if (!result) return;
     const d = displayResult;
+    const isHealthy = result.status === 'Healthy';
     const lines = [
-      `AgriSmart Disease Report`,
-      `========================`,
+      `AgriSmart Plant Health Report`,
+      `==============================`,
       `Date       : ${result.date} ${result.time}`,
       `Crop       : ${d.cropName}`,
-      `Disease    : ${d.disease}`,
-      `Status     : ${d.status}`,
+      `Status     : ${d.disease} (${d.status})`,
       `Confidence : ${result.confidence}%`,
       `Severity   : ${d.severity}`,
-      `Infection  : ${(result.infectionRatio * 100).toFixed(1)}%`,
+      isHealthy ? `` : `Infection  : ${(result.infectionRatio * 100).toFixed(1)}%`,
       ``,
-      `Symptoms:`,
+      isHealthy ? `Health Observations:` : `Symptoms:`,
       ...d.symptoms.map(s => `  • ${s}`),
       ``,
-      `Treatment:`,
+      isHealthy ? `Care Tips:` : `Treatment:`,
       ...d.treatment.map(t => `  • ${t}`),
       ``,
-      `Preventive Care:`,
+      isHealthy ? `Preventive Best Practices:` : `Preventive Care:`,
       ...d.preventive.map(p => `  • ${p}`),
     ];
     const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
@@ -410,34 +411,49 @@ const Analyze = () => {
             <hr style={{ margin: '1.5rem 0', border: 'none', borderTop: '1px solid var(--glass-border)' }} />
 
             {/* detail grid */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '2rem' }}>
-              <div>
-                <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem', color: 'var(--text-main)' }}>
-                  <AlertTriangle size={18} color={statusColor} /> {displayResult.symptomsLabel || 'Symptoms'}
-                </h3>
-                <ul style={{ paddingLeft: '1.2rem', color: 'var(--text-muted)', lineHeight: '1.8' }}>
-                  {displayResult.symptoms.map((s, i) => <li key={i}>{s}</li>)}
-                </ul>
-              </div>
-              <div>
-                <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem', color: 'var(--text-main)' }}>
-                  <CheckCircle size={18} color="var(--primary)" /> {displayResult.treatmentLabel || 'Treatment'}
-                </h3>
-                <ul style={{ paddingLeft: '1.2rem', color: 'var(--text-muted)', lineHeight: '1.8' }}>
-                  {displayResult.treatment.map((t, i) => <li key={i}>{t}</li>)}
-                </ul>
-              </div>
-              {displayResult.preventive?.length > 0 && (
-                <div style={{ gridColumn: '1 / -1' }}>
-                  <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem', color: 'var(--text-main)' }}>
-                    <CheckCircle size={18} color="var(--secondary)" /> {displayResult.preventiveLabel || 'Preventive Care'}
-                  </h3>
-                  <ul style={{ paddingLeft: '1.2rem', color: 'var(--text-muted)', lineHeight: '1.8', columns: 2 }}>
-                    {displayResult.preventive.map((p, i) => <li key={i}>{p}</li>)}
-                  </ul>
+            {(() => {
+              const isHealthy = result.status === 'Healthy';
+              const symptomsLabel = displayResult.symptomsLabel || (isHealthy ? '🌿 Health Observations' : '⚠️ Symptoms');
+              const treatmentLabel = displayResult.treatmentLabel || (isHealthy ? '💧 Care Tips' : '💊 Treatment');
+              const preventiveLabel = displayResult.preventiveLabel || (isHealthy ? '🛡️ Preventive Best Practices' : '🛡️ Preventive Care');
+              return (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '2rem' }}>
+                  <div>
+                    <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem', color: 'var(--text-main)' }}>
+                      {isHealthy
+                        ? <CheckCircle size={18} color="var(--primary)" />
+                        : <AlertTriangle size={18} color={statusColor} />}
+                      {symptomsLabel}
+                    </h3>
+                    <ul style={{ paddingLeft: '1.2rem', color: 'var(--text-muted)', lineHeight: '1.8' }}>
+                      {displayResult.symptoms.length > 0
+                        ? displayResult.symptoms.map((s, i) => <li key={i}>{s}</li>)
+                        : <li style={{ color: 'var(--primary)' }}>No issues detected — plant appears healthy!</li>}
+                    </ul>
+                  </div>
+                  <div>
+                    <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem', color: 'var(--text-main)' }}>
+                      <CheckCircle size={18} color="var(--primary)" /> {treatmentLabel}
+                    </h3>
+                    <ul style={{ paddingLeft: '1.2rem', color: 'var(--text-muted)', lineHeight: '1.8' }}>
+                      {displayResult.treatment.length > 0
+                        ? displayResult.treatment.map((t, i) => <li key={i}>{t}</li>)
+                        : <li style={{ color: 'var(--primary)' }}>Continue current care routine to maintain plant health.</li>}
+                    </ul>
+                  </div>
+                  {displayResult.preventive?.length > 0 && (
+                    <div style={{ gridColumn: '1 / -1' }}>
+                      <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem', color: 'var(--text-main)' }}>
+                        <CheckCircle size={18} color="var(--secondary)" /> {preventiveLabel}
+                      </h3>
+                      <ul style={{ paddingLeft: '1.2rem', color: 'var(--text-muted)', lineHeight: '1.8', columns: 2 }}>
+                        {displayResult.preventive.map((p, i) => <li key={i}>{p}</li>)}
+                      </ul>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
+              );
+            })()}
 
             {/* download */}
             <div style={{ marginTop: '1.5rem', display: 'flex', justifyContent: 'flex-end' }}>
