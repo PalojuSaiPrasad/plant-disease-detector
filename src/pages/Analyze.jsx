@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { Upload, X, CheckCircle, AlertTriangle, Loader, AlertOctagon, Download, ImagePlus, Leaf } from 'lucide-react';
+import { Upload, X, CheckCircle, AlertTriangle, Loader, AlertOctagon, Download, ImagePlus, Leaf, Globe } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
@@ -26,13 +26,13 @@ const ConfidenceRing = ({ value }) => {
 };
 
 /* ── infection progress bar ── */
-const InfectionBar = ({ ratio }) => {
+const InfectionBar = ({ ratio, label }) => {
   const pct = (ratio * 100).toFixed(1);
   const color = ratio < 0.2 ? 'var(--primary)' : ratio < 0.5 ? 'var(--accent)' : '#ef4444';
   return (
     <div style={{ marginTop: '0.5rem' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', marginBottom: '0.3rem', color: 'var(--text-muted)' }}>
-        <span>Infection Area</span><span style={{ fontWeight: '700', color }}>{pct}%</span>
+        <span>{label || 'Infection Area'}</span><span style={{ fontWeight: '700', color }}>{pct}%</span>
       </div>
       <div style={{ height: '8px', borderRadius: '99px', background: '#e5e7eb', overflow: 'hidden' }}>
         <motion.div style={{ height: '100%', borderRadius: '99px', background: color }}
@@ -45,6 +45,22 @@ const InfectionBar = ({ ratio }) => {
 /* ── loading steps ── */
 const loadingSteps = ['Uploading image…', 'Running AI analysis…', 'Detecting disease patterns…', 'Generating report…'];
 
+/* ── supported languages ── */
+const LANGUAGES = [
+  { code: 'en', label: '🇬🇧 English',         name: 'English' },
+  { code: 'hi', label: '🇮🇳 Hindi (हिन्दी)',    name: 'Hindi' },
+  { code: 'te', label: '🇮🇳 Telugu (తెలుగు)',  name: 'Telugu' },
+  { code: 'ta', label: '🇮🇳 Tamil (தமிழ்)',    name: 'Tamil' },
+  { code: 'kn', label: '🇮🇳 Kannada (ಕನ್ನಡ)', name: 'Kannada' },
+  { code: 'ml', label: '🇮🇳 Malayalam (മലയാളം)', name: 'Malayalam' },
+  { code: 'mr', label: '🇮🇳 Marathi (मराठी)',  name: 'Marathi' },
+  { code: 'bn', label: '🇮🇳 Bengali (বাংলা)',  name: 'Bengali' },
+  { code: 'gu', label: '🇮🇳 Gujarati (ગુજરાતી)', name: 'Gujarati' },
+  { code: 'pa', label: '🇮🇳 Punjabi (ਪੰਜਾਬੀ)', name: 'Punjabi' },
+  { code: 'or', label: '🇮🇳 Odia (ଓଡ଼ିଆ)',    name: 'Odia' },
+  { code: 'ur', label: '🇮🇳 Urdu (اردو)',      name: 'Urdu' },
+];
+
 const Analyze = () => {
   const [image, setImage] = useState(null);
   const [preview, setPreview] = useState(null);
@@ -54,17 +70,20 @@ const Analyze = () => {
   const [error, setError] = useState(null);
   const [dragging, setDragging] = useState(false);
   const [manualCrop, setManualCrop] = useState('');
+  const [selectedLang, setSelectedLang] = useState('en');
+  const [translating, setTranslating] = useState(false);
+  const [translated, setTranslated] = useState(null);
   const imageRef = useRef(null);
 
   const applyFile = (file) => {
     if (!file) return;
     setImage(file);
     setPreview(URL.createObjectURL(file));
-    setResult(null); setError(null);
+    setResult(null); setError(null); setTranslated(null);
   };
 
   const handleImageChange = (e) => applyFile(e.target.files[0]);
-  const clearImage = () => { setImage(null); setPreview(null); setResult(null); setError(null); };
+  const clearImage = () => { setImage(null); setPreview(null); setResult(null); setError(null); setTranslated(null); };
 
   const onDrop = useCallback((e) => {
     e.preventDefault(); setDragging(false);
@@ -83,7 +102,7 @@ const Analyze = () => {
 
   const handleAnalyze = async () => {
     if (!image) return;
-    setLoading(true); setError(null); setResult(null); setLoadStep(0);
+    setLoading(true); setError(null); setResult(null); setLoadStep(0); setTranslated(null);
 
     const stepTimer = setInterval(() => setLoadStep(s => Math.min(s + 1, loadingSteps.length - 1)), 700);
 
@@ -97,10 +116,13 @@ const Analyze = () => {
 
       const prompt = `
         You are a highly skilled plant pathology expert AI.
-        Analyze this image of a plant ${manualCrop ? `(The user indicated this plant might be a ${manualCrop})` : ''}.
-        Identify the crop name, and precisely diagnose any diseases, deficiencies, or pests present.
-        Respond strictly in the following JSON format:
+        Analyze this image ${manualCrop ? `(The user indicated this might be a ${manualCrop})` : ''}.
+        First, determine if the image actually contains a plant or leaf.
+        If the image does NOT contain any plant, crop, or leaf, respond with:
+        { "isPlant": false }
+        If the image contains a plant or leaf, respond strictly in the following JSON format:
         {
+          "isPlant": true,
           "cropName": "Detected crop name",
           "disease": "Name of the disease (or 'Healthy' if no issue)",
           "status": "Healthy, Infected, or Critical",
@@ -115,11 +137,17 @@ const Analyze = () => {
         - The response MUST be pure valid JSON only. No markdown code blocks.
         - confidence: number 0-100. infectionRatio: decimal 0-1.
         - Do not hallucinate a disease if the plant looks healthy.
+        - If no plant is visible, ONLY return { "isPlant": false } and nothing else.
       `;
 
       const res = await model.generateContent([prompt, imagePart]);
       const cleanText = res.response.text().replace(/```json/gi, '').replace(/```/g, '').trim();
       const json = JSON.parse(cleanText);
+
+      if (json.isPlant === false) {
+        setError('No plant or leaf detected in the uploaded image. Please upload a clear photo of a plant leaf.');
+        return;
+      }
 
       const newResult = {
         id: Date.now(),
@@ -147,27 +175,81 @@ const Analyze = () => {
     }
   };
 
+  /* ── Translate results using Gemini ── */
+  const handleTranslate = async () => {
+    if (!result || selectedLang === 'en') { setTranslated(null); return; }
+    setTranslating(true);
+    try {
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+
+      const langName = LANGUAGES.find(l => l.code === selectedLang)?.name || selectedLang;
+
+      const dataToTranslate = {
+        cropName: result.cropName,
+        disease: result.disease,
+        status: result.status,
+        severity: result.severity,
+        symptomsLabel: 'Symptoms',
+        treatmentLabel: 'Treatment',
+        preventiveLabel: 'Preventive Care',
+        infectionLabel: 'Infection Area',
+        severityLabel: 'Severity',
+        symptoms: result.symptoms,
+        treatment: result.treatment,
+        preventive: result.preventive,
+      };
+
+      const prompt = 'You are a professional agricultural translator.\n'
+        + 'Translate ALL the field values in the following JSON from English into ' + langName + '.\n'
+        + 'Translate EVERY string value including every item inside symptoms, treatment, and preventive arrays.\n'
+        + 'Keep translations farmer-friendly and accurate.\n'
+        + 'Return ONLY the translated JSON with the same structure. No extra text, no markdown.\n\n'
+        + JSON.stringify(dataToTranslate, null, 2);
+
+      const res = await model.generateContent(prompt);
+      const cleanText = res.response.text().replace(/```json/gi, '').replace(/```/g, '').trim();
+      const json = JSON.parse(cleanText);
+
+      if (!Array.isArray(json.symptoms)) json.symptoms = result.symptoms;
+      if (!Array.isArray(json.treatment)) json.treatment = result.treatment;
+      if (!Array.isArray(json.preventive)) json.preventive = result.preventive;
+
+      setTranslated(json);
+    } catch (err) {
+      console.error('Translation failed:', err);
+      alert('Translation failed. Please try again.');
+      setTranslated(null);
+    } finally {
+      setTranslating(false);
+    }
+  };
+
+  const displayResult = translated ? { ...result, ...translated } : result;
+
   const downloadReport = () => {
     if (!result) return;
+    const d = displayResult;
     const lines = [
       `AgriSmart Disease Report`,
       `========================`,
       `Date       : ${result.date} ${result.time}`,
-      `Crop       : ${result.cropName}`,
-      `Disease    : ${result.disease}`,
-      `Status     : ${result.status}`,
+      `Crop       : ${d.cropName}`,
+      `Disease    : ${d.disease}`,
+      `Status     : ${d.status}`,
       `Confidence : ${result.confidence}%`,
-      `Severity   : ${result.severity}`,
+      `Severity   : ${d.severity}`,
       `Infection  : ${(result.infectionRatio * 100).toFixed(1)}%`,
       ``,
       `Symptoms:`,
-      ...result.symptoms.map(s => `  • ${s}`),
+      ...d.symptoms.map(s => `  • ${s}`),
       ``,
       `Treatment:`,
-      ...result.treatment.map(t => `  • ${t}`),
+      ...d.treatment.map(t => `  • ${t}`),
       ``,
       `Preventive Care:`,
-      ...result.preventive.map(p => `  • ${p}`),
+      ...d.preventive.map(p => `  • ${p}`),
     ];
     const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
@@ -223,7 +305,7 @@ const Analyze = () => {
               style={{ padding: '0.9rem 1rem', borderRadius: '0.5rem', border: '1px solid var(--glass-border)', background: 'var(--background)', color: 'var(--text-main)', fontSize: '0.95rem', width: '100%' }}>
               <option value="">🌱 Auto-Detect Plant (Gemini AI)</option>
               <option disabled>--- Common Crops ---</option>
-              {[['Tomato','🍅'],['Potato','🥔'],['Corn','🌽'],['Rice','🌾'],['Wheat','🌾'],['Apple','🍎'],['Grape','🍇'],['Strawberry','🍓'],['Peach','🍑'],['Guava','🍈'],['Mango','🥭'],['Pepper','🌶️'],['Cotton','🧶'],['Citrus','🍋'],['Tea','🍵'],['Coffee','☕'],['Sugarcane','🎋'],['Brinjal','🍆'],['Cauliflower','🥦']]
+              {[['Tomato', '🍅'], ['Potato', '🥔'], ['Corn', '🌽'], ['Rice', '🌾'], ['Wheat', '🌾'], ['Apple', '🍎'], ['Grape', '🍇'], ['Strawberry', '🍓'], ['Peach', '🍑'], ['Guava', '🍈'], ['Mango', '🥭'], ['Pepper', '🌶️'], ['Cotton', '🧶'], ['Citrus', '🍋'], ['Tea', '🍵'], ['Coffee', '☕'], ['Sugarcane', '🎋'], ['Brinjal', '🍆'], ['Cauliflower', '🥦']]
                 .map(([v, e]) => <option key={v} value={v}>{e} {v}</option>)}
               <option disabled>--- Other ---</option>
               <option value="Plant">🌿 Other Plant / Leaf</option>
@@ -262,22 +344,68 @@ const Analyze = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
               <div>
                 <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '0.2rem' }}>
-                  🌿 {result.cropName} · {result.date} {result.time}
+                  🌿 {displayResult.cropName} · {result.date} {result.time}
                 </p>
-                <h2 style={{ fontSize: '1.8rem', color: 'var(--text-main)', marginBottom: '0.6rem' }}>{result.disease}</h2>
+                <h2 style={{ fontSize: '1.8rem', color: 'var(--text-main)', marginBottom: '0.6rem' }}>{displayResult.disease}</h2>
                 <span style={{ background: statusColor, color: 'white', padding: '0.25rem 0.9rem', borderRadius: '1rem', fontSize: '0.88rem', fontWeight: 'bold' }}>
-                  {result.status}
+                  {displayResult.status}
                 </span>
-                {result.severity && result.severity !== 'None' && result.status !== 'Healthy' && (
+                {displayResult.severity && displayResult.severity !== 'None' && result.status !== 'Healthy' && (
                   <span style={{ marginLeft: '0.6rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-                    Severity: <strong>{result.severity}</strong>
+                    {displayResult.severityLabel || 'Severity'}: <strong>{displayResult.severity}</strong>
                   </span>
                 )}
               </div>
               <ConfidenceRing value={result.confidence} />
             </div>
 
-            <InfectionBar ratio={result.infectionRatio} />
+            <InfectionBar ratio={result.infectionRatio} label={displayResult.infectionLabel} />
+
+            {/* ── Language Translator ── */}
+            <div style={{ marginTop: '1.5rem', padding: '1rem', background: 'rgba(16,185,129,0.06)', borderRadius: '0.75rem', border: '1px solid var(--glass-border)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                <Globe size={18} color="var(--primary)" />
+                <span style={{ fontWeight: '700', fontSize: '0.95rem', color: 'var(--text-main)' }}>Translate Results</span>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>· Get results in your language</span>
+              </div>
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                <select
+                  value={selectedLang}
+                  onChange={(e) => { setSelectedLang(e.target.value); setTranslated(null); }}
+                  style={{ flex: 1, minWidth: '180px', padding: '0.7rem 1rem', borderRadius: '0.5rem', border: '1px solid var(--glass-border)', background: 'var(--background)', color: 'var(--text-main)', fontSize: '0.92rem' }}
+                >
+                  {LANGUAGES.map(l => (
+                    <option key={l.code} value={l.code}>{l.label}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={handleTranslate}
+                  disabled={translating || selectedLang === 'en'}
+                  className="btn btn-primary"
+                  style={{ padding: '0.7rem 1.4rem', fontSize: '0.92rem', gap: '0.5rem', opacity: selectedLang === 'en' ? 0.5 : 1 }}
+                >
+                  {translating ? (
+                    <span className="flex-center" style={{ gap: '0.5rem' }}>
+                      <Loader className="animate-spin" size={16} /> Translating…
+                    </span>
+                  ) : (
+                    <><Globe size={16} /> Translate</>
+                  )}
+                </button>
+                {translated && (
+                  <button onClick={() => { setTranslated(null); setSelectedLang('en'); }}
+                    style={{ padding: '0.7rem 1rem', borderRadius: '0.5rem', border: '1px solid var(--glass-border)', background: 'transparent', color: 'var(--text-muted)', fontSize: '0.85rem', cursor: 'pointer' }}>
+                    Reset to English
+                  </button>
+                )}
+              </div>
+              {translated && (
+                <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                  style={{ marginTop: '0.6rem', fontSize: '0.82rem', color: 'var(--primary)', fontWeight: 600 }}>
+                  ✅ Results translated to {LANGUAGES.find(l => l.code === selectedLang)?.label}
+                </motion.p>
+              )}
+            </div>
 
             <hr style={{ margin: '1.5rem 0', border: 'none', borderTop: '1px solid var(--glass-border)' }} />
 
@@ -285,27 +413,27 @@ const Analyze = () => {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '2rem' }}>
               <div>
                 <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem', color: 'var(--text-main)' }}>
-                  <AlertTriangle size={18} color={statusColor} /> Symptoms
+                  <AlertTriangle size={18} color={statusColor} /> {displayResult.symptomsLabel || 'Symptoms'}
                 </h3>
                 <ul style={{ paddingLeft: '1.2rem', color: 'var(--text-muted)', lineHeight: '1.8' }}>
-                  {result.symptoms.map((s, i) => <li key={i}>{s}</li>)}
+                  {displayResult.symptoms.map((s, i) => <li key={i}>{s}</li>)}
                 </ul>
               </div>
               <div>
                 <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem', color: 'var(--text-main)' }}>
-                  <CheckCircle size={18} color="var(--primary)" /> Treatment
+                  <CheckCircle size={18} color="var(--primary)" /> {displayResult.treatmentLabel || 'Treatment'}
                 </h3>
                 <ul style={{ paddingLeft: '1.2rem', color: 'var(--text-muted)', lineHeight: '1.8' }}>
-                  {result.treatment.map((t, i) => <li key={i}>{t}</li>)}
+                  {displayResult.treatment.map((t, i) => <li key={i}>{t}</li>)}
                 </ul>
               </div>
-              {result.preventive?.length > 0 && (
+              {displayResult.preventive?.length > 0 && (
                 <div style={{ gridColumn: '1 / -1' }}>
                   <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem', color: 'var(--text-main)' }}>
-                    <CheckCircle size={18} color="var(--secondary)" /> Preventive Care
+                    <CheckCircle size={18} color="var(--secondary)" /> {displayResult.preventiveLabel || 'Preventive Care'}
                   </h3>
                   <ul style={{ paddingLeft: '1.2rem', color: 'var(--text-muted)', lineHeight: '1.8', columns: 2 }}>
-                    {result.preventive.map((p, i) => <li key={i}>{p}</li>)}
+                    {displayResult.preventive.map((p, i) => <li key={i}>{p}</li>)}
                   </ul>
                 </div>
               )}
