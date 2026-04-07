@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Trash2, Calendar, Clock, Activity, Leaf, AlertTriangle, BarChart2, X } from 'lucide-react';
+import { Trash2, Calendar, Clock, Activity, Leaf, AlertTriangle, BarChart2, X, Download } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link } from 'react-router-dom';
 
@@ -31,6 +31,38 @@ const Dashboard = () => {
   const filtered = filter === 'All' ? history : history.filter(h => h.status === filter);
 
   const statusColor = (s) => s === 'Healthy' ? 'var(--primary)' : s === 'Critical' ? '#ef4444' : 'var(--accent)';
+  
+  const downloadReport = (item) => {
+    const isHealthy = item.status === 'Healthy';
+    const lines = [
+      `AgriSmart Plant Health Report`,
+      `==============================`,
+      `Date       : ${item.date} ${item.time}`,
+      `Crop       : ${item.cropName || 'Unknown'}`,
+      `Status     : ${item.disease} (${item.status})`,
+      `Confidence : ${item.confidence}%`,
+      `Severity   : ${item.severity || 'None'}`,
+      isHealthy ? `` : `Infection  : ${item.infectionRatio ? (item.infectionRatio * 100).toFixed(1) : '0.0'}%`,
+      ``,
+      isHealthy ? `Health Observations:` : `Symptoms:`,
+      ...(item.symptoms || []).map(s => `  • ${s}`),
+      ``,
+      isHealthy ? `Care Tips:` : `Treatment:`,
+      ...(item.treatment || []).map(t => `  • ${t}`),
+      ``,
+      isHealthy ? `Preventive Best Practices:` : `Preventive Care:`,
+      ...(item.preventive || []).map(p => `  • ${p}`),
+    ];
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `agrismart-report-${item.id}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="container" style={{ paddingTop: '100px', paddingBottom: '60px' }}>
@@ -137,6 +169,12 @@ const Dashboard = () => {
                     <div style={{ fontSize: '1.5rem', fontWeight: '800', color: statusColor(item.status) }}>{item.confidence}%</div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Confidence</div>
                   </div>
+                  <button 
+                    onClick={() => downloadReport(item)}
+                    title="Download Report"
+                    style={{ padding: '0.5rem', borderRadius: '50%', background: '#f0fdf4', color: 'var(--primary)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Download size={16} />
+                  </button>
                   <button
                     onClick={() => deleteItem(item.id)}
                     title="Remove this entry"

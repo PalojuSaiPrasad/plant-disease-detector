@@ -252,9 +252,15 @@ const Analyze = () => {
       isHealthy ? `Preventive Best Practices:` : `Preventive Care:`,
       ...d.preventive.map(p => `  • ${p}`),
     ];
-    const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-    a.download = `agrismart-report-${result.id}.txt`; a.click();
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `agrismart-report-${result.id}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   const statusColor = result ? (result.status === 'Healthy' ? 'var(--primary)' : result.status === 'Critical' ? '#ef4444' : 'var(--accent)') : 'var(--primary)';
